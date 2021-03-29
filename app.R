@@ -30,7 +30,8 @@ ui <- shinyUI(
 		 tabsetPanel(
 		  tabPanel("Plot", plotOutput("distPlot")),
 		  tabPanel("Table", tableOutput("userTable")),
-		  tabPanel("UpSet", plotOutput("upsetPlot"))
+		  tabPanel("UpSet", plotOutput("upsetPlot")),
+		  tabPanel("Scatter", plotOutput("scatterPlot"))
 		 )
 		)
 		
@@ -66,6 +67,12 @@ server <- function(input, output) {
   
   upset(dat.View, sets = colnames(dat.View)[-1], order.by = "freq", sets.bar.color = "#56B4E9", empty.intersections = "off")
 
+	
+  })
+  
+   output$scatterPlot <- renderPlot({
+
+  plot(iris[,2:3])
 	
   })
   
