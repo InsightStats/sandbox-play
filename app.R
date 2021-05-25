@@ -1,92 +1,199 @@
 
 # setwd("C:\\Users\\insig\\Documents\\Projects\\Internal\\P0002_DeployRShiny\\sandbox-play")
 
+# https://gist.github.com/yihui/6091942
 
 library(shiny)
-library(UpSetR)
-# library(knitr)
+library(openxlsx)
+library(heatmap3)
+library(scatterplot3d) 
+library(lattice)
+library(tools)
 
-# rmdfiles <- c("RMarkdownFile.rmd")
-# sapply(rmdfiles, knit, quiet = T)
+
+source("functions.R")
 
 ui <- shinyUI(
     fluidPage(
 	   markdown("
-		![](logo.JPG)
-		
-		Test Shiny App example
-
-		[Insight Stats Home](https://insightstats.wixsite.com/home) 
-		
+		Example Usable RShiny App - TMTPrepPro
 		"),
 		
 		sidebarPanel(
-		  numericInput('n', 'Number of samples', 3),
-		  fileInput('file1', 'Choose CSV File',
-              accept=c('text/csv', 'text/comma-separated-values,text/plain', '.csv'))	  
+		
+		fileInput('datafile', 'Choose Data Excel File', accept=".xlsx"),	
+		fileInput('designfile', 'Choose Design Excel File', accept=".xlsx"),
+		textInput('PvalCutoff', 'P-value cutoff for significance', "0.05"),
+		textInput('FCCutoff', 'Fold change cutoff for significance', "1.2"),
+		textInput('DuplicateFilter', 'Remove competitor proteins from groups', 'TRUE'),
+		textInput('KeepREF', 'Keep fields marked as REF in design file', "TRUE"),
+		textInput('SampleLoadNorm', 'Normalisation method', "total"),
+		actionButton("runscript", "Run Script")
 		),
 		
 		mainPanel(
 		 tabsetPanel(
-		  tabPanel("Plot", plotOutput("distPlot")),
-		  tabPanel("Table", tableOutput("userTable")),
-		  tabPanel("UpSet", plotOutput("upsetPlot")),
-		  tabPanel("Scatter", plotOutput("scatterPlot"))
+		  tabPanel("InputData", tableOutput("inputData")),
+		  tabPanel("InputDesign", tableOutput("inputDesign")),
+		  tabPanel("Inputcomparisons", tableOutput("Classification")),
+		  tabPanel("HeatmapDE", plotOutput("heatmapDE")),
+		  tabPanel("Params", verbatimTextOutput("currentParams"))
 		 )
 		)
 		
-        # includeMarkdown("RMarkdownFile.md")
-		#, theme = "InsightStats.css"
   )
 )
 
 server <- function(input, output) {
 
- output$distPlot <- renderPlot({
+options(shiny.maxRequestSize=10*1024^2)
 
-  inFile <- input$file1
-  
-  if (is.null(inFile))
-      	return(hist(rnorm(input$n)))
 
-  dat = read.csv(inFile$datapath)
-  boxplot(as.numeric(dat[,2]) ~ dat[,1])
+observeEvent(  input$runscript, {            
+       output$currentParams <- renderText({
+                  paste0("Data file = ", input$datafile$name, "\n",
+				        "Design file = ", input$designfile$name, "\n",
+						 "FC Cutoff - ", input$FCCutoff, "\n",
+						 "Pval Cutoff - ", input$PvalCutoff, "\n",
+						 "Normalisation - ", input$SampleLoadNorm, "\n",
+						 "Remove duplicates from protein groups - ", input$DuplicateFilter, "\n",
+						 "Keep Reference REF - ", input$KeepREF, "\n"
+						 )
+                })
+	    }
+)
+
+				
+designRead <- eventReactive(input$runscript, {
+
+   inFile <- input$designfile
   
-	
+  if(is.null(inFile)){
+    return(NULL)
+    } else
+
+    design = read.xlsx(inFile$datapath, 1)
+    comparisons = read.xlsx(inFile$datapath, 2)
+
+list(design=design, comparisons=comparisons)
   })
   
   
-  output$upsetPlot <- renderPlot({
 
-  inFile <- input$file1
+dataRead <- eventReactive(input$runscript, {
+
+   inFile <- input$datafile
   
-  if (is.null(inFile))
-      	return(hist(rnorm(input$n)))
+  if(is.null(inFile)){
+    return(NULL)
+    } else
 
-  dat.View = read.csv(inFile$datapath)
-  
-  upset(dat.View, sets = colnames(dat.View)[-1], order.by = "freq", sets.bar.color = "#56B4E9", empty.intersections = "off")
-
+	dat =  readWorkbook(inFile$datapath,1, startRow = 1)
 	
+	dat
+
   })
   
-   output$scatterPlot <- renderPlot({
-
-  plot(iris[,2:3])
-	
-  })
-  
-   output$userTable <- renderTable({
+dataProcess <- eventReactive(input$runscript, {
  
-	inFile <- input$file1
+  if( is.null(input$datafile) | is.null(input$designfile)  ){
+    return(NULL)
+    } else {
 
-    if (is.null(inFile))
-      	return(NULL)
-    
-    head(read.csv(inFile$datapath))
+	design.res = designRead()
+	design = design.res$design
+	comparisons = design.res$comparisons
+	dat = dataRead()
+	DuplicateFilter = ( input$DuplicateFilter == "TRUE" )
+	# BatchNorm = (input$BatchNorm == "TRUE")
+	KeepREF = (input$KeepREF == "TRUE")
+	PvalCutoff = as.numeric(input$PvalCutoff)
+	FCCutoff = as.numeric(input$FCCutoff)
+	SampleLoadNorm = input$SampleLoadNorm
+	
+	
+	
+	params = c( "datafile", "designfile", "PvalCutoff", "FCCutoff", "DuplicateFilter",
+				"KeepREF", "SampleLoadNorm")
+	paramValues = c(input$datafile$name, input$designfile$name, PvalCutoff, FCCutoff, DuplicateFilter,
+				KeepREF, SampleLoadNorm)
+
+	param.df = data.frame(params,paramValues)
+
+	# res = processDataMatrix(dat, design, DuplicateFilter=TRUE)
+
+	res = TMTPrePro(mg.all=dat, Design=design, Comparisons=comparisons, 
+	 	PvalCutoff=PvalCutoff, FCCutoff=FCCutoff, 
+			DuplicateFilter=DuplicateFilter, KeepREF=KeepREF, 
+			SampleLoadNorm=SampleLoadNorm)	
+
+	
+	return(param.df)
+
+  }
+  })
+   
+  
+   output$inputDesign <- renderTable({
+ 
+	inFile <- input$designfile
+	if(is.null(inFile)){
+     return(NULL)
+     } else
+	
+    designRead()$design
 	
   })
   
+ 
+   output$inputComparisons <- renderTable({
+ 
+	inFile <- input$designfile
+	if(is.null(inFile)){
+     return(NULL)
+     } else
+	
+    designRead()$comparisons
+	
+  })
+  
+  
+   output$inputData <- renderTable({
+ 
+	inFile <- input$datafile
+  
+	if(is.null(inFile)){
+     return(NULL)
+     } else
+	
+    head(dataRead())
+	
+  })
+  
+  
+ output$heatmapDE <- renderPlot({
+ 
+  if(is.null(input$datafile) | is.null(input$designfile) ){
+      	return(plot(1, type="n", main="No data yet", axes=FALSE))
+   } else 
+
+  # dat = dataProcess()
+  return(plot(iris[,2], iris[,3]))
+  
+	
+  })
+  
+  
+   output$Classification <- renderTable({
+ 
+	if(is.null(input$datafile) | is.null(input$designfile) ){
+      	return(NULL)
+   } else 
+	dataProcess()
+	
+  })
+  
+
 }
 
 shinyApp(ui, server)
